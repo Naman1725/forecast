@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 4. Copy your application code
 COPY app.py .
-COPY forecast.py .         # or forecast_service.py, whichever you use
+COPY forecast_service.py .         # or forecast_service.py, whichever you use
 
 # 5. Expose the port your Flask app listens on
 EXPOSE 5000
