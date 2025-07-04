@@ -1,21 +1,19 @@
-# Dockerfile
-
-# 1. Pick a lightweight base image
+# 1. Base image
 FROM python:3.11-slim
 
-# 2. Set a working directory
+# 2. Set working dir
 WORKDIR /app
 
-# 3. Copy and install Python dependencies
+# 3. Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Copy your application code
+# 4. Copy code
+COPY app.py .
 COPY forecast_service.py .
-COPY main.py .
 
-# 5. Expose the port your FastAPI app will run on
-EXPOSE 8000
+# 5. Expose Flask’s default port
+EXPOSE 5000
 
-# 6. Start the server with Uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 6. Use gunicorn for production
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:5000", "--workers", "3"]
