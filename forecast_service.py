@@ -36,6 +36,7 @@ def extract_date_from_filename(filename: str) -> str | None:
             return f"{year}-{mm}-01"
     return None
 
+"""
 def forecast_kpi(
     df: pd.DataFrame,
     country: str,
@@ -110,6 +111,106 @@ def forecast_kpi(
 
     except Exception as e:
         return None, None, f"Forecast failed: {e}\n{traceback.format_exc()}"
+
+"""
+
+
+
+def forecast_kpi(
+    df: pd.DataFrame,
+    country: str,
+    tech: str,
+    zone: str,
+    kpi: str,
+    forecast_months: int
+):
+    """
+    Filters df by the given identifiers, fits Prophet, returns (fig, summary, error).
+    """
+    try:
+        # Exact-match filtering
+        filtered = df[
+            (df['Country'] == country) &
+            (df['Technology'] == tech) &
+            (df['Zone'] == zone) &
+            (df['KPI'] == kpi)
+        ]
+        if filtered.empty:
+            return None, None, "No data available for the selected inputs"
+
+        value_col = 'Actual Value MAPS Networks'
+        if value_col not in filtered.columns:
+            return None, None, f"Expected column '{value_col}' not found"
+
+        # Prepare time series for Prophet
+        ts = (
+            filtered
+            .groupby('Date')[value_col]
+            .mean()
+            .reset_index()
+            .rename(columns={'Date': 'ds', value_col: 'y'})
+        )
+        ts['ds'] = pd.to_datetime(ts['ds'])
+
+        # Train Prophet
+        model = Prophet()
+        model.fit(ts)
+
+        # Forecast into future
+        future = model.make_future_dataframe(periods=forecast_months, freq='MS')
+        forecast = model.predict(future)
+
+        # Filter only future forecast for plotting
+        last_actual_date = ts['ds'].max()
+        forecast_future = forecast[forecast['ds'] > last_actual_date]
+
+        # Plotting
+        fig = go.Figure()
+
+        # Actual values
+        fig.add_trace(go.Scatter(x=ts['ds'], y=ts['y'], mode='lines+markers', name='Actual'))
+
+        # Forecasted values
+        fig.add_trace(go.Scatter(x=forecast_future['ds'], y=forecast_future['yhat'], mode='lines', name='Forecast'))
+
+        # Upper and lower bounds
+        fig.add_trace(go.Scatter(
+            x=forecast_future['ds'], y=forecast_future['yhat_upper'],
+            mode='lines', name='Upper Bound', line=dict(dash='dot')
+        ))
+        fig.add_trace(go.Scatter(
+            x=forecast_future['ds'], y=forecast_future['yhat_lower'],
+            mode='lines', name='Lower Bound', line=dict(dash='dot')
+        ))
+
+        # Optional: Vertical line for forecast start
+        fig.add_vline(
+            x=last_actual_date,
+            line=dict(color="gray", dash="dash"),
+            annotation_text="Forecast starts",
+            annotation_position="top right"
+        )
+
+        # Layout
+        fig.update_layout(
+            title=f"Forecast for {kpi} — {zone} | {tech} | {country}",
+            xaxis_title="Date",
+            yaxis_title=kpi,
+            template="plotly_white"
+        )
+
+        # Summary text for forecast
+        tail = forecast_future[['ds', 'yhat']].tail(forecast_months)
+        summary = "\n".join(
+            f"{row['ds'].date()}: {row['yhat']:.2f}"
+            for _, row in tail.iterrows()
+        )
+
+        return fig, summary, None
+
+    except Exception as e:
+        return None, None, f"Forecast failed: {e}\n{traceback.format_exc()}"
+
 
 def run_forecast_pipeline(
     zip_buffer: bytes,
