@@ -10,11 +10,12 @@ import plotly.graph_objects as go
 import traceback
 from calendar import month_abbr
 from datetime import datetime
-from typing import Optional  # ✅ Add this
+from typing import Optional  # ✅ Python 3.9-compatible typing
 
+# === Month mapping for filename → date conversion
 month_map = {abbr: f"{i:02d}" for i, abbr in enumerate(month_abbr) if abbr}
 
-# ✅ Use Optional[str] for Python 3.9 compatibility
+# ✅ Use Optional[str] instead of str | None for Python 3.9
 def extract_date_from_filename(filename: str) -> Optional[str]:
     name = os.path.basename(filename)
     base, _ = os.path.splitext(name)
@@ -26,17 +27,12 @@ def extract_date_from_filename(filename: str) -> Optional[str]:
             return f"{year}-{mm}-01"
     return None
 
-
-# === Month mapping for filename → date conversion
-month_map = {abbr: f"{i:02d}" for i, abbr in enumerate(month_abbr) if abbr}
-
 # === (Optional) KPI reasons dictionary for summaries or annotations
 kpi_reasons = {
     "Call Completion Rate": ["Congestion", "Dropped handover", "High user traffic"],
     "Drop call rate": ["Weak signal", "Tower issue", "Interference"],
     "Block call rate": ["All channels busy", "Call setup delay"],
 }
-
 
 
 def forecast_kpi(
@@ -47,11 +43,7 @@ def forecast_kpi(
     kpi: str,
     forecast_months: int
 ):
-    """
-    Filters df by the given identifiers, fits Prophet, returns (fig, summary, error).
-    """
     try:
-        # Exact-match filtering
         filtered = df[
             (df['Country'] == country) &
             (df['Technology'] == tech) &
@@ -61,12 +53,10 @@ def forecast_kpi(
         if filtered.empty:
             return None, None, "No data available for the selected inputs"
 
-        # Our actual value column in these sheets
         value_col = 'Actual Value MAPS Networks'
         if value_col not in filtered.columns:
             return None, None, f"Expected column '{value_col}' not found"
 
-        # Build time series
         ts = (
             filtered
             .groupby('Date')[value_col]
@@ -75,24 +65,25 @@ def forecast_kpi(
             .rename(columns={'Date': 'ds', value_col: 'y'})
         )
 
-        # Fit Prophet
         model = Prophet()
         model.fit(ts)
 
-        # Forecast forward
         future = model.make_future_dataframe(periods=forecast_months, freq='MS')
         forecast = model.predict(future)
 
-        # Build Plotly figure
+        # Only include forecast after the last actual date
+        last_actual_date = ts['ds'].max()
+        forecast_future = forecast[forecast['ds'] > last_actual_date].head(forecast_months)
+
         fig = go.Figure([
             go.Scatter(x=ts['ds'], y=ts['y'], mode='lines+markers', name='Actual'),
-            go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Forecast'),
+            go.Scatter(x=forecast_future['ds'], y=forecast_future['yhat'], mode='lines', name='Forecast'),
             go.Scatter(
-                x=forecast['ds'], y=forecast['yhat_upper'],
+                x=forecast_future['ds'], y=forecast_future['yhat_upper'],
                 mode='lines', name='Upper Bound', line=dict(dash='dot')
             ),
             go.Scatter(
-                x=forecast['ds'], y=forecast['yhat_lower'],
+                x=forecast_future['ds'], y=forecast_future['yhat_lower'],
                 mode='lines', name='Lower Bound', line=dict(dash='dot')
             ),
         ])
@@ -102,18 +93,15 @@ def forecast_kpi(
             yaxis_title=kpi,
         )
 
-        # Summary lines (last N forecast points)
-        tail = forecast[['ds', 'yhat']].tail(forecast_months)
         summary = "\n".join(
             f"{row['ds'].date()}: {row['yhat']:.2f}"
-            for _, row in tail.iterrows()
+            for _, row in forecast_future.iterrows()
         )
 
         return fig, summary, None
 
     except Exception as e:
         return None, None, f"Forecast failed: {e}\n{traceback.format_exc()}"
-
 
 
 def run_forecast_pipeline(
@@ -124,24 +112,15 @@ def run_forecast_pipeline(
     kpi: str,
     forecast_months: int = 3
 ):
-    """
-    1. Extracts the uploaded ZIP into a single TemporaryDirectory.
-    2. Reads all .xlsx/.xls files into DataFrames, adding 'Date' & 'source_file'.
-    3. Concatenates them, then calls forecast_kpi().
-    4. Returns (plot_json, summary, error_msg).
-    """
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            # → Write the raw ZIP bytes
             zip_path = os.path.join(tmpdir, "upload.zip")
             with open(zip_path, "wb") as f:
                 f.write(zip_buffer)
 
-            # → Extract all excels
             with zipfile.ZipFile(zip_path, "r") as z:
                 z.extractall(tmpdir)
 
-            # → Locate Excel files
             excel_files = []
             for root, _, files in os.walk(tmpdir):
                 for fn in files:
@@ -151,12 +130,10 @@ def run_forecast_pipeline(
             if not excel_files:
                 return None, None, "No Excel files found in ZIP archive"
 
-            # → Read and assemble
             records = []
             for path in excel_files:
                 try:
                     df = pd.read_excel(path)
-                    # clean column names
                     df.columns = df.columns.str.strip()
                     date_str = extract_date_from_filename(path)
                     if date_str:
@@ -171,16 +148,14 @@ def run_forecast_pipeline(
 
             df_all = pd.concat(records, ignore_index=True)
 
-            # → Forecast
             fig, summary, err = forecast_kpi(
                 df_all, country, tech, zone, kpi, forecast_months
             )
             if err:
                 return None, None, err
 
-            # ← NEW: emit pure JSON
-            plot_json_str = fig.to_json()            # JSON string
-            plot_json = json.loads(plot_json_str)    # pure Python dict
+            plot_json_str = fig.to_json()
+            plot_json = json.loads(plot_json_str)
 
             return plot_json, summary, None
 
