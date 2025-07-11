@@ -10,6 +10,22 @@ import plotly.graph_objects as go
 import traceback
 from calendar import month_abbr
 from datetime import datetime
+from typing import Optional  # ✅ Add this
+
+month_map = {abbr: f"{i:02d}" for i, abbr in enumerate(month_abbr) if abbr}
+
+# ✅ Use Optional[str] for Python 3.9 compatibility
+def extract_date_from_filename(filename: str) -> Optional[str]:
+    name = os.path.basename(filename)
+    base, _ = os.path.splitext(name)
+    match = pd.Series([base]).str.extract(r'([A-Za-z]{3})(\d{4})')
+    if not match.isnull().values.any():
+        mon, year = match.iloc[0]
+        mm = month_map.get(mon.capitalize())
+        if mm:
+            return f"{year}-{mm}-01"
+    return None
+
 
 # === Month mapping for filename → date conversion
 month_map = {abbr: f"{i:02d}" for i, abbr in enumerate(month_abbr) if abbr}
@@ -21,20 +37,6 @@ kpi_reasons = {
     "Block call rate": ["All channels busy", "Call setup delay"],
 }
 
-def extract_date_from_filename(filename: str) -> str | None:
-    """
-    Extract a YYYY-MM-01 date string from filenames like 'Jan2023.xlsx'.
-    Returns None if no match.
-    """
-    name = os.path.basename(filename)
-    base, _ext = os.path.splitext(name)
-    match = pd.Series([base]).str.extract(r'([A-Za-z]{3})(\d{4})')
-    if not match.isnull().values.any():
-        mon, year = match.iloc[0]
-        mm = month_map.get(mon.capitalize())
-        if mm:
-            return f"{year}-{mm}-01"
-    return None
 
 
 def forecast_kpi(
